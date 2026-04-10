@@ -1,0 +1,33 @@
+# ═══════════════════════════════════════════════════════════
+# SDR Agent 88i — Production Dependencies
+# ═══════════════════════════════════════════════════════════
+
+# HTTP client (sync + async)
+httpx[http2]>=0.27.0
+
+# Web framework (webhook listener + API)
+fastapi>=0.115.0
+uvicorn[standard]>=0.32.0
+
+# Scheduler
+apscheduler>=3.10.4
+
+# Web scraping
+beautifulsoup4>=4.12.0
+lxml>=5.0.0
+
+# Email
+aiosmtplib>=3.0.0
+
+# Environment
+python-dotenv>=1.0.0
+
+# Logging
+python-json-logger>=2.0.0
+
+# Tests
+pytest>=8.0.0
+pytest-asyncio>=0.24.0
+
+# Async
+anyio>=4.0.0
