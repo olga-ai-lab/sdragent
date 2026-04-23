@@ -1,5 +1,11 @@
 """
-Discovery Module — Busca de leads via Apify Google Maps e BrasilAPI.
+Discovery Module — Busca de leads via LinkedIn (Apify), Google Maps (Apify) e BrasilAPI.
+
+Ordem no pipeline:
+  1. LinkedIn Company Search  — filtros de indústria/porte/localização
+  2. Google Maps              — cobertura geográfica por cidade
+  3. BrasilAPI CNPJ           — enriquecimento gratuito por CNPJ
+
 Custo estimado: $20-40 total para 500+ empresas (Apify).
 BrasilAPI: gratuito.
 """
@@ -12,7 +18,9 @@ import httpx
 from config.settings import (
     APIFY_API_KEY, ICP_DEFINITIONS, CIDADES_ALVO, API_ENDPOINTS,
     CLIENTES_ATIVOS_88I, DESCARTADOS,
+    HUNT_DEFAULT_SOURCES, LINKEDIN_HUNT_FILTERS, HUNT_LINKEDIN_MAX_RESULTS,
 )
+from modules.linkedin_discovery import LinkedInDiscovery
 
 
 class LeadDiscovery:
@@ -21,6 +29,7 @@ class LeadDiscovery:
         self.apify_key = apify_key
         self.client = httpx.Client(timeout=120.0)
         self.discovered: list[dict] = []
+        self._linkedin = LinkedInDiscovery(apify_key)
 
     # ───────────────────────────────────────────
     # APIFY GOOGLE MAPS SCRAPER
@@ -178,38 +187,74 @@ class LeadDiscovery:
         icps: list[str] = None,
         cidades: list[str] = None,
         max_per_query: int = 30,
+        sources: list[str] = None,
+        linkedin_filters: list[dict] = None,
     ) -> list[dict]:
         """
-        Executa discovery completo:
-        - Para cada ICP → para cada query → para cada cidade → Apify
-        - Deduplicação por nome normalizado
+        Executa discovery completo em duas fontes (ordem de execução):
+
+        1. LinkedIn Company Search (Apify) — filtros de indústria/porte
+        2. Google Maps (Apify)             — cobertura geográfica por cidade
+
+        Args:
+            icps: ICPs a processar para Google Maps (["ICP1","ICP2","ICP3"])
+            cidades: lista de cidades para Google Maps
+            max_per_query: max resultados por query em ambas as fontes
+            sources: ["linkedin","google_maps"] — quais fontes ativar
+            linkedin_filters: substitui LINKEDIN_HUNT_FILTERS do settings
+
+        Deduplicação global por nome normalizado + linkedin_url.
         """
         icps = icps or ["ICP1", "ICP2", "ICP3"]
-        cidades = cidades or CIDADES_ALVO[:4]  # começar com 4 cidades
+        cidades = cidades or CIDADES_ALVO[:4]
+        sources = sources or HUNT_DEFAULT_SOURCES
+        linkedin_filters = linkedin_filters if linkedin_filters is not None else LINKEDIN_HUNT_FILTERS
 
-        all_leads = []
-        seen_names = set()
+        all_leads: list[dict] = []
+        seen: set[str] = set()
 
-        for icp_key in icps:
-            icp_def = ICP_DEFINITIONS.get(icp_key)
-            if not icp_def:
-                continue
+        def _add(lead: dict):
+            key = self._dedup_key(lead)
+            if key not in seen:
+                seen.add(key)
+                all_leads.append(lead)
 
-            queries = icp_def.get("apify_queries", [])
+        # ── STEP 1: LINKEDIN ─────────────────────────────────────
+        if "linkedin" in sources and linkedin_filters:
             print(f"\n{'='*60}")
-            print(f"🎯 {icp_key}: {icp_def['nome']}")
-            print(f"   {len(queries)} queries × {len(cidades)} cidades")
+            print("🔗 STEP 1 — LINKEDIN COMPANY SEARCH")
+            print(f"   {len(linkedin_filters)} queries configuradas")
             print(f"{'='*60}")
+            li_leads = self._linkedin.run_discovery(
+                linkedin_filters,
+                max_per_query=max_per_query,
+            )
+            for lead in li_leads:
+                _add(lead)
+            print(f"  → {len(li_leads)} leads do LinkedIn adicionados")
+        elif "linkedin" in sources and not linkedin_filters:
+            print("\n⚠️  LinkedIn habilitado mas LINKEDIN_HUNT_FILTERS está vazio.")
+            print("   Preencha config/settings.py → LINKEDIN_HUNT_FILTERS para ativar.")
 
-            for query in queries:
-                for cidade in cidades:
-                    leads = self.search_apify_maps(query, cidade, max_per_query, icp_key)
-                    for lead in leads:
-                        name_key = self._normalize_name(lead["nome"])
-                        if name_key not in seen_names:
-                            seen_names.add(name_key)
-                            all_leads.append(lead)
-                    time.sleep(2)  # rate limit entre queries
+        # ── STEP 2: GOOGLE MAPS ──────────────────────────────────
+        if "google_maps" in sources:
+            for icp_key in icps:
+                icp_def = ICP_DEFINITIONS.get(icp_key)
+                if not icp_def:
+                    continue
+
+                queries = icp_def.get("apify_queries", [])
+                print(f"\n{'='*60}")
+                print(f"🗺️  STEP 2 — GOOGLE MAPS | {icp_key}: {icp_def['nome']}")
+                print(f"   {len(queries)} queries × {len(cidades)} cidades")
+                print(f"{'='*60}")
+
+                for query in queries:
+                    for cidade in cidades:
+                        leads = self.search_apify_maps(query, cidade, max_per_query, icp_key)
+                        for lead in leads:
+                            _add(lead)
+                        time.sleep(2)
 
         self.discovered = all_leads
         print(f"\n📊 TOTAL DESCOBERTO: {len(all_leads)} empresas únicas")
@@ -222,6 +267,12 @@ class LeadDiscovery:
     def _normalize_name(self, name: str) -> str:
         return name.lower().strip().replace(" ", "").replace("-", "").replace(".", "")
 
+    def _dedup_key(self, lead: dict) -> str:
+        """Usa linkedin_url quando disponível, senão nome normalizado."""
+        if lead.get("linkedin_url"):
+            return lead["linkedin_url"].rstrip("/").lower()
+        return self._normalize_name(lead["nome"])
+
     def _is_excluded(self, name: str) -> bool:
         name_lower = name.lower()
         for excluded in CLIENTES_ATIVOS_88I + DESCARTADOS:
@@ -231,3 +282,4 @@ class LeadDiscovery:
 
     def close(self):
         self.client.close()
+        self._linkedin.close()

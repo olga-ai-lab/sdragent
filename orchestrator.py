@@ -21,6 +21,7 @@ from typing import Optional
 from config.settings import (
     CADENCIA_SDR, CIDADES_ALVO, ICP_DEFINITIONS,
     CLIENTES_ATIVOS_88I, DESCARTADOS,
+    HUNT_DEFAULT_SOURCES, LINKEDIN_HUNT_FILTERS,
 )
 from modules.claude_client import ClaudeClient
 from modules.supabase_client import SupabaseClient
@@ -59,25 +60,43 @@ class SDROrchestrator:
         icps: list[str] = None,
         cidades: list[str] = None,
         max_per_query: int = 30,
+        sources: list[str] = None,
+        linkedin_filters: list[dict] = None,
     ) -> list[dict]:
         """
         Pipeline completo:
-        1. Discovery (Apify + BrasilAPI)
-        2. Enrichment (Lusha + Claude)
-        3. Scoring (regras + IA)
-        4. Persist (Supabase)
-        5. Report
+        1a. Discovery — LinkedIn Company Search  (filtros de indústria/porte)
+        1b. Discovery — Google Maps              (cobertura geográfica)
+        2.  Enrichment (Lusha + Claude)
+        3.  Scoring (regras + IA)
+        4.  Persist (Supabase)
+        5.  Report
+
+        Args:
+            sources: quais fontes ativar, ex: ["linkedin","google_maps"]
+            linkedin_filters: lista de dicts de filtros LinkedIn; se None usa
+                              LINKEDIN_HUNT_FILTERS de settings.py
         """
         start = time.time()
+        sources = sources or HUNT_DEFAULT_SOURCES
+        li_filters = linkedin_filters if linkedin_filters is not None else LINKEDIN_HUNT_FILTERS
+
         print("\n" + "=" * 70)
         print("🚀 SDR AGENT 88i — PIPELINE COMPLETO")
-        print(f"   Modo: {'DRY RUN' if self.dry_run else 'PRODUÇÃO'}")
-        print(f"   Data: {datetime.now(timezone.utc).strftime('%Y-%m-%d %H:%M UTC')}")
+        print(f"   Modo:   {'DRY RUN' if self.dry_run else 'PRODUÇÃO'}")
+        print(f"   Data:   {datetime.now(timezone.utc).strftime('%Y-%m-%d %H:%M UTC')}")
+        print(f"   Fontes: {', '.join(sources)}")
+        if "linkedin" in sources:
+            print(f"   LinkedIn queries: {len(li_filters)}")
         print("=" * 70)
 
         # Step 1: Discovery
-        print("\n📡 STEP 1/4 — DISCOVERY")
-        leads = self.discovery.run_full_discovery(icps, cidades, max_per_query)
+        print("\n📡 STEP 1/4 — DISCOVERY (LinkedIn → Google Maps)")
+        leads = self.discovery.run_full_discovery(
+            icps, cidades, max_per_query,
+            sources=sources,
+            linkedin_filters=li_filters,
+        )
 
         if not leads:
             print("  ❌ Nenhum lead encontrado. Pipeline encerrado.")
@@ -330,6 +349,7 @@ def main():
     parser.add_argument("--icps", type=str, default="ICP1,ICP2,ICP3", help="ICPs a processar")
     parser.add_argument("--cidades", type=str, default="", help="Cidades (separadas por vírgula)")
     parser.add_argument("--max-per-query", type=int, default=30, help="Max resultados por query Apify")
+    parser.add_argument("--sources", type=str, default="", help="Fontes: linkedin,google_maps (padrão: settings)")
     parser.add_argument("--outreach-status", type=str, default="HOT", help="Status para outreach")
     parser.add_argument("--outreach-dia", type=int, default=1, help="Dia da cadência")
     parser.add_argument("--outreach-limit", type=int, default=10, help="Max leads para outreach")
@@ -347,7 +367,8 @@ def main():
         if args.mode == "full":
             icps = args.icps.split(",")
             cidades = args.cidades.split(",") if args.cidades else None
-            orchestrator.run_full_pipeline(icps, cidades, args.max_per_query)
+            sources = args.sources.split(",") if args.sources else None
+            orchestrator.run_full_pipeline(icps, cidades, args.max_per_query, sources=sources)
 
         elif args.mode == "score-only":
             if args.input:

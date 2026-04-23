@@ -61,6 +61,38 @@ HUNT_DEFAULT_SOURCES = os.getenv("HUNT_DEFAULT_SOURCES", "google_maps,linkedin")
 # Máximo de resultados por query no LinkedIn hunt
 HUNT_LINKEDIN_MAX_RESULTS = int(os.getenv("HUNT_LINKEDIN_MAX_RESULTS", "50"))
 
+# ─────────────────────────────────────────────────────────────────
+# LINKEDIN HUNT FILTERS — preencher com filtros reais antes de rodar
+#
+# Cada dict da lista vira uma query independente no LinkedIn.
+# Campos suportados:
+#   keywords    : termos de busca (obrigatório)
+#   location    : país/cidade em texto livre (ex: "Brazil", "São Paulo")
+#   industry    : lista de indústrias LinkedIn (ex: ["Transportation"])
+#   companySize : lista de códigos LinkedIn:
+#                   A=1-10  B=11-50  C=51-200  D=201-500
+#                   E=501-1k  F=1k-5k  G=5k-10k  H=10k+
+#   icp_tipo    : rótulo interno para scoring (ICP1 / ICP2 / ICP3)
+#
+# Deixe a lista vazia ([]) para desabilitar o LinkedIn hunt.
+# ─────────────────────────────────────────────────────────────────
+LINKEDIN_HUNT_FILTERS: list[dict] = [
+    # EXEMPLO — substitua pelos filtros reais quando disponíveis:
+    # {
+    #     "keywords": "last mile delivery entregadores plataforma",
+    #     "location": "Brazil",
+    #     "industry": ["Transportation, Logistics, Supply Chain and Storage"],
+    #     "companySize": ["C", "D", "E", "F"],   # 51–5000 funcionários
+    #     "icp_tipo": "ICP1",
+    # },
+    # {
+    #     "keywords": "motoboy courier delivery app motoristas",
+    #     "location": "Brazil",
+    #     "companySize": ["B", "C", "D"],
+    #     "icp_tipo": "ICP1",
+    # },
+]
+
 # ═══════════════════════════════════════════════════════════════
 # MODELOS CLAUDE — Regra de Ouro #2: modelo certo pra tarefa
 # ═══════════════════════════════════════════════════════════════
