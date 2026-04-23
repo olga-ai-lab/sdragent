@@ -21,6 +21,8 @@ def _env_bool(name: str, default: bool = False) -> bool:
 ANTHROPIC_API_KEY = os.getenv("ANTHROPIC_API_KEY", "")
 SUPABASE_URL = os.getenv("SUPABASE_URL", "")
 SUPABASE_KEY = os.getenv("SUPABASE_KEY", "")
+# Service-role key bypasses API allowlist and RLS — use only server-side
+SUPABASE_SERVICE_KEY = os.getenv("SUPABASE_SERVICE_KEY", "")
 LUSHA_API_KEY = os.getenv("LUSHA_API_KEY", "")
 APIFY_API_KEY = os.getenv("APIFY_API_KEY", "")
 EVOLUTION_API_URL = os.getenv("EVOLUTION_API_URL", "")
