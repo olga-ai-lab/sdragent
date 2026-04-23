@@ -21,6 +21,7 @@ from config.settings import (
     HUNT_DEFAULT_SOURCES, LINKEDIN_HUNT_FILTERS, HUNT_LINKEDIN_MAX_RESULTS,
 )
 from modules.linkedin_discovery import LinkedInDiscovery
+from modules.lead_merger import LeadMerger
 
 
 class LeadDiscovery:
@@ -30,6 +31,7 @@ class LeadDiscovery:
         self.client = httpx.Client(timeout=120.0)
         self.discovered: list[dict] = []
         self._linkedin = LinkedInDiscovery(apify_key)
+        self._merger = LeadMerger()
 
     # ───────────────────────────────────────────
     # APIFY GOOGLE MAPS SCRAPER
@@ -255,6 +257,9 @@ class LeadDiscovery:
                         for lead in leads:
                             _add(lead)
                         time.sleep(2)
+
+        # Funde leads da mesma empresa vindos de fontes diferentes
+        all_leads = self._merger.merge_batch(all_leads)
 
         self.discovered = all_leads
         print(f"\n📊 TOTAL DESCOBERTO: {len(all_leads)} empresas únicas")

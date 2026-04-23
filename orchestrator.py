@@ -29,6 +29,7 @@ from modules.discovery import LeadDiscovery
 from modules.enrichment import LeadEnrichment
 from modules.scoring import ScoringEngine
 from modules.outreach import OutreachEngine
+from modules.daily_digest import DailyDigest
 
 
 class SDROrchestrator:
@@ -49,6 +50,7 @@ class SDROrchestrator:
         self.outreach = OutreachEngine(self.claude)
 
         self.supabase = SupabaseClient() if use_supabase else None
+        self.digest = DailyDigest(supabase=self.supabase)
         self.results: list[dict] = []
 
     # ═══════════════════════════════════════════════════════════
@@ -254,6 +256,35 @@ class SDROrchestrator:
         return scored
 
     # ═══════════════════════════════════════════════════════════
+    # MODO: DIGEST DIÁRIO
+    # ═══════════════════════════════════════════════════════════
+
+    def run_digest(
+        self,
+        sdr_phone: str = "",
+        remetente: str = "Fernanda",
+        leads: list[dict] = None,
+    ) -> str:
+        """
+        Gera e (opcionalmente) envia o digest diário para o SDR.
+
+        Args:
+            sdr_phone: número WhatsApp do SDR (ex: 5511999999999)
+            remetente: nome do SDR
+            leads: lista de leads (usa self.results se None)
+        """
+        source = leads or self.results or []
+
+        if sdr_phone:
+            result = self.digest.send(sdr_phone, leads=source or None, remetente=remetente)
+            print(f"\n📋 Digest {'enviado' if result['status'] == 'sent' else result['status']} para {sdr_phone}")
+            return result.get("status", "")
+        else:
+            msg = self.digest.build(leads=source or None, remetente=remetente)
+            print("\n" + msg)
+            return msg
+
+    # ═══════════════════════════════════════════════════════════
     # PERSIST & REPORT
     # ═══════════════════════════════════════════════════════════
 
@@ -341,7 +372,7 @@ class SDROrchestrator:
 
 def main():
     parser = argparse.ArgumentParser(description="SDR Agent 88i — OlgaAI")
-    parser.add_argument("--mode", choices=["full", "score-only", "outreach", "single"], default="full")
+    parser.add_argument("--mode", choices=["full", "score-only", "outreach", "single", "digest"], default="full")
     parser.add_argument("--dry-run", action="store_true", help="Simular sem enviar mensagens")
     parser.add_argument("--no-supabase", action="store_true", help="Não usar Supabase")
     parser.add_argument("--no-lusha", action="store_true", help="Não usar Lusha")
@@ -354,6 +385,8 @@ def main():
     parser.add_argument("--outreach-dia", type=int, default=1, help="Dia da cadência")
     parser.add_argument("--outreach-limit", type=int, default=10, help="Max leads para outreach")
     parser.add_argument("--export", type=str, default="sdr_results.json", help="Arquivo de saída")
+    parser.add_argument("--sdr-phone", type=str, default="", help="WhatsApp do SDR para receber o digest")
+    parser.add_argument("--remetente", type=str, default="Fernanda", help="Nome do SDR (para personalização)")
 
     args = parser.parse_args()
 
@@ -381,6 +414,12 @@ def main():
                 status_filter=args.outreach_status,
                 step_dia=args.outreach_dia,
                 limit=args.outreach_limit,
+            )
+
+        elif args.mode == "digest":
+            orchestrator.run_digest(
+                sdr_phone=args.sdr_phone,
+                remetente=args.remetente,
             )
 
         elif args.mode == "single":

@@ -7,16 +7,39 @@ import json
 from datetime import datetime, timezone
 from typing import Optional
 import httpx
-from config.settings import SUPABASE_URL, SUPABASE_KEY, SUPABASE_TABLES
+from config.settings import SUPABASE_URL, SUPABASE_KEY, SUPABASE_SERVICE_KEY, SUPABASE_TABLES
+
+# Colunas conhecidas de companies_88i_pipeline.
+# Campos extras no lead dict são descartados antes do upsert para evitar 400.
+_PIPELINE_COLUMNS = {
+    "empresa_id","nome","site","cnpj","segmento","icp_tipo","status","tier","porte",
+    "cidade","uf","score","score_breakdown","score_icp","decisor_nome","decisor_cargo",
+    "decisor_email","decisor_telefone","decisor_linkedin","telefone","seguro_atual",
+    "seguradora_parceira","gap_oportunidade","entregadores_est","ai_segmento",
+    "ai_tem_entregadores","ai_entregadores_est","ai_porte","ai_plataforma_digital",
+    "ai_seguro_detectado","ai_formato_email","ai_risco_exclusao","ai_confianca",
+    "enrichment_complete","exclusion_reason","source","place_id","produto_88i",
+    "obs_estrategica","proxima_acao","updated_at","tier_88i","status_pipeline",
+    "estado","linkedin_empresa","linkedin_decisor","email","score_88i","fonte",
+    "data_inclusao","finder","corretor_flag","canal_comercial","contato","valor_tcv",
+    "grau_confianca","atualizacao","motivo_perda","responsavel",
+    # novas colunas adicionadas via migração
+    "deal_value_est","deal_value_premissas","sinal_dor","sinal_dor_motivo",
+    "linkedin_url","descricao_linkedin","employees_linkedin","industry_linkedin","pais",
+    "sources","status_history","status_changed_at","status_reason",
+    "web_pages_scraped","enrichment_source","enrichment_error","ai_decisor_sugerido",
+}
 
 
 class SupabaseClient:
 
     def __init__(self, url: str = SUPABASE_URL, key: str = SUPABASE_KEY):
         self.url = url.rstrip("/")
+        # Prefer service_role key for server-side usage — bypasses API allowlist
+        effective_key = SUPABASE_SERVICE_KEY or key
         self.headers = {
-            "apikey": key,
-            "Authorization": f"Bearer {key}",
+            "apikey": effective_key,
+            "Authorization": f"Bearer {effective_key}",
             "Content-Type": "application/json",
             "Prefer": "return=representation",
         }
@@ -31,10 +54,14 @@ class SupabaseClient:
 
     def upsert_lead(self, lead: dict) -> dict:
         """Upsert lead no pipeline — deduplicação por empresa_id."""
-        lead["updated_at"] = datetime.now(timezone.utc).isoformat()
+        # Filtra apenas colunas conhecidas para evitar erro 400 do PostgREST
+        payload = {k: v for k, v in lead.items() if k in _PIPELINE_COLUMNS}
+        payload["updated_at"] = datetime.now(timezone.utc).isoformat()
+        # web_content pode ser grande — não persistir no pipeline
+        payload.pop("web_content", None)
         resp = self.client.post(
             self._rest_url(SUPABASE_TABLES["leads"]),
-            json=lead,
+            json=payload,
             headers={**self.headers, "Prefer": "return=representation,resolution=merge-duplicates"},
         )
         resp.raise_for_status()
@@ -159,13 +186,15 @@ class SupabaseClient:
         )
         data = resp.json()
         if data and len(data) > 0:
-            return json.loads(data[0].get("data", "{}"))
+            raw = data[0].get("data") or {}
+            # data é jsonb → já retorna como dict; fallback para string legada
+            return raw if isinstance(raw, dict) else json.loads(raw)
         return None
 
     def set_cached_enrichment(self, cache_key: str, data: dict, source: str = ""):
         record = {
             "cache_key": cache_key,
-            "data": json.dumps(data, ensure_ascii=False),
+            "data": data,          # jsonb — não serializar para string
             "source": source,
             "cached_at": datetime.now(timezone.utc).isoformat(),
         }

@@ -9,12 +9,14 @@ from config.settings import (
     ICP_DEFINITIONS, EXCLUSION_FILTERS,
 )
 from modules.claude_client import ClaudeClient
+from modules.pain_signals import PainSignalDetector
 
 
 class ScoringEngine:
 
     def __init__(self, claude: Optional[ClaudeClient] = None):
         self.claude = claude
+        self.pain_detector = PainSignalDetector()
         self.scoring_models = {
             "ICP1": SCORING_ICP1,
             "ICP2": SCORING_ICP2,
@@ -62,6 +64,11 @@ class ScoringEngine:
         lead["status"] = status
         lead["score_breakdown"] = breakdown
         lead["score_icp"] = icp
+
+        # Deal value estimate (ARR potencial em R$)
+        deal = self._calc_deal_value(lead)
+        lead["deal_value_est"] = deal["deal_value_est"]
+        lead["deal_value_premissas"] = deal["deal_value_premissas"]
 
         return lead
 
@@ -193,12 +200,10 @@ class ScoringEngine:
         return regras.get("desconhecido", 3)
 
     def _score_sinal_dor(self, lead: dict, regras: dict) -> int:
-        # Empresa nova sem seguro = forte sinal
-        seguro = lead.get("ai_seguro_detectado", "")
-        if seguro == "nao":
-            return regras.get("empresa_nova_sem_seguro", 8)
-        # TODO: check mídia/sinistros via web search
-        return regras.get("nenhum", 0)
+        pain = self.pain_detector.detect(lead)
+        lead["sinal_dor"] = pain["sinal"]
+        lead["sinal_dor_motivo"] = pain["motivo"]
+        return regras.get(pain["sinal"], regras.get("nenhum", 0))
 
     # ───────────────────────────────────────────
     # BONUS & EXCLUSION
@@ -236,6 +241,60 @@ class ScoringEngine:
         return "COLD"
 
     # ───────────────────────────────────────────
+    # DEAL VALUE
+    # ───────────────────────────────────────────
+
+    def _calc_deal_value(self, lead: dict) -> dict:
+        """
+        Estima ARR potencial (R$/ano) com base no ICP e dados do lead.
+
+        ICP1 (AP Compulsório): entregadores × 200 viagens/mês × R$0,14/viagem × 12m
+        ICP2 (Mercadoria):     despachos/mês × R$0,07 × 12m
+        ICP3 (TMS/Canal):      clientes × 500 despachos × R$0,07 × 12m
+        """
+        icp = lead.get("icp_tipo", "ICP1")
+        num = self._parse_num(lead.get("ai_entregadores_est") or lead.get("entregadores_est") or "")
+
+        if icp == "ICP1":
+            if num:
+                arr = round(num * 200 * 0.14 * 12)
+                return {
+                    "deal_value_est": arr,
+                    "deal_value_premissas": f"{num} ent × 200 viag × R$0,14 × 12m = R${arr:,}",
+                }
+        elif icp == "ICP2":
+            if num:
+                arr = round(num * 0.07 * 12)
+                return {
+                    "deal_value_est": arr,
+                    "deal_value_premissas": f"{num} desp/mês × R$0,07 × 12m = R${arr:,}",
+                }
+        elif icp == "ICP3":
+            if num:
+                arr = round(num * 500 * 0.07 * 12)
+                return {
+                    "deal_value_est": arr,
+                    "deal_value_premissas": f"{num} transp × 500 desp × R$0,07 × 12m = R${arr:,}",
+                }
+
+        return {"deal_value_est": 0, "deal_value_premissas": "dados insuficientes"}
+
+    @staticmethod
+    def _parse_num(raw) -> int:
+        """Extrai o maior número de uma string como '500-1000', '50k', '10000'."""
+        if not raw:
+            return 0
+        s = str(raw).lower().replace(",", "").replace(".", "")
+        if "k" in s:
+            try:
+                return int(float(s.replace("k", "")) * 1000)
+            except ValueError:
+                pass
+        import re
+        nums = re.findall(r"\d+", s)
+        return int(nums[-1]) if nums else 0
+
+    # ───────────────────────────────────────────
     # BATCH SCORING
     # ───────────────────────────────────────────
 
@@ -250,10 +309,18 @@ class ScoringEngine:
         cold = sum(1 for l in scored if l.get("status") == "COLD")
         excluded = sum(1 for l in scored if l.get("status") == "excluded")
 
+        total_arr = sum(l.get("deal_value_est", 0) for l in scored if l.get("status") != "excluded")
+        hot_arr = sum(l.get("deal_value_est", 0) for l in scored if l.get("status") == "HOT")
+
         print(f"\n📊 SCORING COMPLETO:")
         print(f"   🔥 HOT: {hot}  |  ⚡ WARM: {warm}  |  ❄️ COLD: {cold}  |  ❌ Excluídos: {excluded}")
+        print(f"   💰 ARR potencial total: R${total_arr:,.0f}  |  HOT: R${hot_arr:,.0f}")
         print(f"   Top 5:")
         for l in scored[:5]:
-            print(f"     {l.get('score', 0):3d} pts — {l.get('nome', '?')} [{l.get('status')}]")
+            arr = l.get("deal_value_est", 0)
+            arr_str = f"  [ARR R${arr:,.0f}]" if arr else ""
+            sinal = l.get("sinal_dor", "")
+            sinal_str = f"  🚨{sinal}" if sinal and sinal != "nenhum" else ""
+            print(f"     {l.get('score', 0):3d} pts — {l.get('nome', '?')} [{l.get('status')}]{arr_str}{sinal_str}")
 
         return scored
