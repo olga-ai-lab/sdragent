@@ -211,6 +211,15 @@ class TestStateMachine:
         assert history[1]["from"] == "enriched"
         assert history[1]["to"] == "HOT"
 
+    def test_null_status_history_treated_as_empty(self):
+        """Supabase can return status_history null; transition should initialize a list."""
+        lead = {"nome": "Test", "status": "contacted", "status_history": None}
+        updated = self.sm.transition(lead, "replied", "WhatsApp reply")
+        assert updated["status"] == "replied"
+        assert len(updated["status_history"]) == 1
+        assert updated["status_history"][0]["from"] == "contacted"
+        assert updated["status_history"][0]["to"] == "replied"
+
     def test_lost_can_reactivate(self):
         """Lead perdido pode ser reativado (nurture ou contacted)."""
         lead = {"nome": "Test", "status": "lost"}

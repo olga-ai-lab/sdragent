@@ -69,7 +69,7 @@ class LeadStateMachine:
         lead["status_reason"] = reason
 
         # Adicionar ao histórico
-        history = lead.get("status_history", [])
+        history = lead.get("status_history") or []
         history.append({
             "from": current,
             "to": new_status,
