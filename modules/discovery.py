@@ -19,6 +19,7 @@ from config.settings import (
     APIFY_API_KEY, ICP_DEFINITIONS, CIDADES_ALVO, API_ENDPOINTS,
     CLIENTES_ATIVOS_88I, DESCARTADOS,
     HUNT_DEFAULT_SOURCES, LINKEDIN_HUNT_FILTERS, HUNT_LINKEDIN_MAX_RESULTS,
+    parse_csv_list,
 )
 from modules.linkedin_discovery import LinkedInDiscovery
 from modules.lead_merger import LeadMerger
@@ -209,7 +210,7 @@ class LeadDiscovery:
         """
         icps = icps or ["ICP1", "ICP2", "ICP3"]
         cidades = cidades or CIDADES_ALVO[:4]
-        sources = sources or HUNT_DEFAULT_SOURCES
+        sources = parse_csv_list(",".join(sources)) if sources else HUNT_DEFAULT_SOURCES
         linkedin_filters = linkedin_filters if linkedin_filters is not None else LINKEDIN_HUNT_FILTERS
 
         all_leads: list[dict] = []

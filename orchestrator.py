@@ -22,6 +22,7 @@ from config.settings import (
     CADENCIA_SDR, CIDADES_ALVO, ICP_DEFINITIONS,
     CLIENTES_ATIVOS_88I, DESCARTADOS,
     HUNT_DEFAULT_SOURCES, LINKEDIN_HUNT_FILTERS,
+    parse_csv_list,
 )
 from modules.claude_client import ClaudeClient
 from modules.supabase_client import SupabaseClient
@@ -398,9 +399,9 @@ def main():
 
     try:
         if args.mode == "full":
-            icps = args.icps.split(",")
-            cidades = args.cidades.split(",") if args.cidades else None
-            sources = args.sources.split(",") if args.sources else None
+            icps = parse_csv_list(args.icps)
+            cidades = parse_csv_list(args.cidades) if args.cidades else None
+            sources = parse_csv_list(args.sources) if args.sources else None
             orchestrator.run_full_pipeline(icps, cidades, args.max_per_query, sources=sources)
 
         elif args.mode == "score-only":

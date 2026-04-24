@@ -14,6 +14,10 @@ def _env_bool(name: str, default: bool = False) -> bool:
         return default
     return str(raw).strip().lower() in {"1", "true", "yes", "on"}
 
+
+def parse_csv_list(raw: str) -> list[str]:
+    return [item.strip() for item in (raw or "").split(",") if item.strip()]
+
 # ═══════════════════════════════════════════════════════════════
 # API KEYS (carregar de .env)
 # ═══════════════════════════════════════════════════════════════
@@ -58,7 +62,7 @@ APIFY_ACTOR_LINKEDIN_POSTS = os.getenv(
 )
 
 # Sources padrão para hunt (google_maps e/ou linkedin)
-HUNT_DEFAULT_SOURCES = os.getenv("HUNT_DEFAULT_SOURCES", "google_maps,linkedin").split(",")
+HUNT_DEFAULT_SOURCES = parse_csv_list(os.getenv("HUNT_DEFAULT_SOURCES", "google_maps,linkedin"))
 
 # Máximo de resultados por query no LinkedIn hunt
 HUNT_LINKEDIN_MAX_RESULTS = int(os.getenv("HUNT_LINKEDIN_MAX_RESULTS", "50"))
