@@ -30,7 +30,7 @@ from fastapi.middleware.cors import CORSMiddleware
 
 load_dotenv()
 
-from config.settings import CADENCIA_SDR, HUNT_DEFAULT_SOURCES, HUNT_LINKEDIN_MAX_RESULTS
+from config.settings import CADENCIA_SDR, HUNT_DEFAULT_SOURCES, HUNT_LINKEDIN_MAX_RESULTS, parse_csv_list
 from modules.claude_client import ClaudeClient
 from modules.supabase_client import SupabaseClient
 from modules.discovery import LeadDiscovery
@@ -41,7 +41,7 @@ from modules.outreach import OutreachEngine
 from modules.email_client import EmailClient
 from modules.state_machine import LeadStateMachine
 from modules.scheduler import SDRScheduler
-from modules.webhook_server import router as webhook_router, init_webhook
+from modules.webhook_server import router as webhook_router, init_webhook, close_webhook
 from modules.intelligence_engine import IntelligenceEngine
 from modules.logger import get_logger
 
@@ -398,6 +398,7 @@ async def lifespan(app: FastAPI):
     # Shutdown
     log.info("═══ SDR AGENT 88i — SHUTTING DOWN ═══")
     scheduler.stop()
+    close_webhook()
     orchestrator.close()
 
 
@@ -507,9 +508,9 @@ async def execute_hunt(
         orch = ProductionOrchestrator(dry_run=dry_run)
         try:
             return orch.run_hunt_pipeline(
-                sources=sources.split(","),
-                icps=icps.split(","),
-                cidades=cidades.split(",") if cidades else None,
+                sources=parse_csv_list(sources),
+                icps=parse_csv_list(icps),
+                cidades=parse_csv_list(cidades) if cidades else None,
                 max_per_query=max_per_query,
             )
         finally:
@@ -591,8 +592,8 @@ def cli():
         orch = ProductionOrchestrator(dry_run=args.dry_run, use_lusha=not args.no_lusha)
         try:
             if args.mode == "full":
-                icps = args.icps.split(",")
-                cidades = args.cidades.split(",") if args.cidades else None
+                icps = parse_csv_list(args.icps)
+                cidades = parse_csv_list(args.cidades) if args.cidades else None
                 orch.run_full_pipeline(icps, cidades)
             elif args.mode == "outreach":
                 orch.run_outreach_step(args.status, args.dia, args.limit)
@@ -606,9 +607,9 @@ def cli():
         )
         try:
             results = orch.run_hunt_pipeline(
-                sources=args.sources.split(","),
-                icps=args.icps.split(","),
-                cidades=args.cidades.split(",") if args.cidades else None,
+                sources=parse_csv_list(args.sources),
+                icps=parse_csv_list(args.icps),
+                cidades=parse_csv_list(args.cidades) if args.cidades else None,
                 max_per_query=args.limit,
             )
             hot = sum(1 for l in results if l.get("status") == "HOT")

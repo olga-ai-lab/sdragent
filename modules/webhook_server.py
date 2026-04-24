@@ -12,7 +12,9 @@ from typing import Optional
 from fastapi import APIRouter, HTTPException, Request
 
 from config.settings import EVOLUTION_API_KEY
+from modules.claude_client import ClaudeClient
 from modules.logger import get_logger
+from modules.outreach import OutreachEngine
 from modules.state_machine import LeadStateMachine
 from modules.supabase_client import SupabaseClient
 
@@ -22,13 +24,184 @@ router = APIRouter(prefix="/webhooks", tags=["webhooks"])
 
 _supabase: Optional[SupabaseClient] = None
 _state_machine: Optional[LeadStateMachine] = None
+_conversation_agent: Optional["ConversationAgent"] = None
 
 
 def init_webhook(supabase: SupabaseClient):
-    global _supabase, _state_machine
+    global _supabase, _state_machine, _conversation_agent
     _supabase = supabase
     _state_machine = LeadStateMachine(supabase)
+    _conversation_agent = ConversationAgent(supabase)
     log.info("Webhook Evolution API inicializado")
+
+
+def close_webhook():
+    if _conversation_agent:
+        _conversation_agent.close()
+
+
+class ConversationAgent:
+    """
+    Responde conversas inbound com contexto do lead e envia via Evolution API.
+
+    O classificador de intent continua deterministico; o Claude entra apenas para
+    redigir a resposta contextual.
+    """
+
+    def __init__(
+        self,
+        supabase: SupabaseClient,
+        claude: Optional[ClaudeClient] = None,
+        outreach: Optional[OutreachEngine] = None,
+    ):
+        self.supabase = supabase
+        self.claude = claude or ClaudeClient()
+        self.outreach = outreach or OutreachEngine(self.claude)
+
+    def respond(
+        self,
+        lead: dict,
+        phone: str,
+        inbound_message: str,
+        intent: str,
+        next_best_action: dict,
+        intelligence: dict,
+    ) -> dict:
+        empresa_id = lead.get("empresa_id") or lead.get("nome") or ""
+        if not phone:
+            return {"status": "ignored", "reason": "no_phone"}
+
+        generation_status = "claude"
+        try:
+            reply = self._generate_reply(
+                lead=lead,
+                inbound_message=inbound_message,
+                intent=intent,
+                next_best_action=next_best_action,
+                intelligence=intelligence,
+            )
+        except Exception as exc:
+            generation_status = "fallback"
+            log.warning(f"ConversationAgent Claude fallback para {empresa_id}: {exc}")
+            reply = self._fallback_reply(intent, next_best_action)
+
+        if not reply:
+            return {"status": "ignored", "reason": "empty_reply"}
+
+        send_result = self.outreach.send_whatsapp(phone, reply)
+        self._log_agent_reply(empresa_id, reply, send_result)
+
+        return {
+            "status": send_result.get("status", "unknown"),
+            "generation": generation_status,
+            "reply": reply,
+            "provider_response": send_result.get("response"),
+            "error": send_result.get("error"),
+        }
+
+    def _generate_reply(
+        self,
+        lead: dict,
+        inbound_message: str,
+        intent: str,
+        next_best_action: dict,
+        intelligence: dict,
+    ) -> str:
+        system = (
+            "Voce e o ConversationAgent da 88i Seguradora Digital. "
+            "Responda como um SDR humano em portugues do Brasil, de forma curta, "
+            "profissional e util. Nao mencione que voce e IA. Nao use emojis. "
+            "Nao invente precos, datas, clientes ou coberturas que nao estejam no contexto. "
+            "Se o lead recusou, encerre com respeito. Se pediu detalhes, explique em poucas "
+            "linhas e puxe uma proxima acao simples."
+        )
+        payload = {
+            "lead": self._lead_context(lead),
+            "closing_intelligence": self._conversation_intelligence(intelligence),
+            "inbound_message": inbound_message,
+            "classified_intent": intent,
+            "next_best_action": next_best_action,
+            "output_rules": {
+                "max_chars": 650,
+                "channel": "whatsapp",
+                "single_message": True,
+            },
+        }
+        prompt = (
+            "Gere somente o texto da resposta que sera enviado no WhatsApp.\n\n"
+            f"{json.dumps(payload, ensure_ascii=False, indent=2)}"
+        )
+        result = self.claude.call(
+            "outreach",
+            prompt,
+            system=system,
+            max_tokens=260,
+            temperature=0.2,
+        )
+        return self._clean_reply(str(result))
+
+    def _lead_context(self, lead: dict) -> dict:
+        fields = (
+            "empresa_id", "nome", "icp_tipo", "status", "score",
+            "segmento", "ai_segmento", "porte", "ai_porte",
+            "entregadores_est", "ai_entregadores_est",
+            "produto_88i", "sinal_dor", "sinal_dor_motivo",
+            "decisor_nome", "decisor_cargo", "cidade", "uf",
+            "obs_estrategica", "proxima_acao",
+        )
+        return {field: lead.get(field) for field in fields if lead.get(field) not in (None, "")}
+
+    def _conversation_intelligence(self, intelligence: dict) -> dict:
+        if not isinstance(intelligence, dict):
+            return {}
+        fields = (
+            "abertura", "pitch_1_frase", "objecao_1", "resposta_1",
+            "timing", "pontos_conexao", "o_que_evitar",
+        )
+        return {field: intelligence.get(field) for field in fields if intelligence.get(field)}
+
+    def _fallback_reply(self, intent: str, next_best_action: dict) -> str:
+        suggested = (next_best_action or {}).get("suggested_reply")
+        if suggested:
+            return self._clean_reply(str(suggested))
+        return {
+            "not_interested": "Obrigado pelo retorno. Vou encerrar os contatos por aqui.",
+            "invalid_number": "Obrigado por avisar. Vou remover este contato da nossa base.",
+            "redirect": "Perfeito, obrigado. Pode me informar o melhor contato para tratar desse tema?",
+            "talk_later": "Combinado. Qual melhor dia e horario para eu te chamar?",
+        }.get(intent, "Obrigado pelo retorno. Pode me dar um pouco mais de contexto para eu te responder melhor?")
+
+    def _clean_reply(self, reply: str, max_chars: int = 650) -> str:
+        text = reply.strip()
+        if text.startswith("```"):
+            text = re.sub(r"^```[a-zA-Z0-9_-]*\s*", "", text)
+            text = re.sub(r"\s*```$", "", text).strip()
+        if text.lower().startswith("resposta:"):
+            text = text.split(":", 1)[1].strip()
+        if len(text) <= max_chars:
+            return text
+        truncated = text[:max_chars].rsplit(".", 1)[0].strip()
+        return truncated or text[:max_chars].strip()
+
+    def _log_agent_reply(self, empresa_id: str, reply: str, send_result: dict):
+        if not empresa_id:
+            return
+        try:
+            self.supabase.log_outreach(
+                empresa_id,
+                {
+                    "canal": "whatsapp",
+                    "tipo": "conversation_agent_reply",
+                    "mensagem": reply,
+                    "status": send_result.get("status", "unknown"),
+                },
+            )
+        except Exception as exc:
+            log.warning(f"Falha logando resposta do ConversationAgent: {exc}")
+
+    def close(self):
+        self.outreach.close()
+        self.claude.close()
 
 
 @router.post("/evolution/receive")
@@ -177,12 +350,24 @@ def _process_inbound_event(body: dict, phone: str, lead: Optional[dict], message
         except ValueError:
             pass
 
+    agent_result = {"status": "disabled"}
+    if _conversation_agent:
+        agent_result = _conversation_agent.respond(
+            lead=lead,
+            phone=phone,
+            inbound_message=message,
+            intent=intent,
+            next_best_action=nba,
+            intelligence=intelligence,
+        )
+
     return {
         "status": "processed",
         "empresa": lead.get("nome"),
         "intent": intent,
         "classification": nba["classification"],
         "recommended_action": nba["recommended_action"],
+        "agent_reply": agent_result,
         "message_id": message_id,
     }
 
