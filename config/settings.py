@@ -63,36 +63,270 @@ HUNT_DEFAULT_SOURCES = os.getenv("HUNT_DEFAULT_SOURCES", "google_maps,linkedin")
 # Máximo de resultados por query no LinkedIn hunt
 HUNT_LINKEDIN_MAX_RESULTS = int(os.getenv("HUNT_LINKEDIN_MAX_RESULTS", "50"))
 
-# ─────────────────────────────────────────────────────────────────
-# LINKEDIN HUNT FILTERS — preencher com filtros reais antes de rodar
+# ─────────────────────────────────────────────────────────────────────────────
+# LINKEDIN HUNT FILTERS — gerado via metodologia XLSX 88i_pipeline_v4_icp_2
+# Fonte: Pipeline de 145 empresas mapeadas | ICP1=91 | ICP2=19 | ICP3=13
+# Screenshot LinkedIn: query "delivery" + Brasil + Transporte/armazenamento
+#   + 51-200 funcionários → expandido para cobrir todos os portes e ICPs
 #
-# Cada dict da lista vira uma query independente no LinkedIn.
-# Campos suportados:
-#   keywords    : termos de busca (obrigatório)
-#   location    : país/cidade em texto livre (ex: "Brazil", "São Paulo")
-#   industry    : lista de indústrias LinkedIn (ex: ["Transportation"])
-#   companySize : lista de códigos LinkedIn:
-#                   A=1-10  B=11-50  C=51-200  D=201-500
+# companySize codes: A=1-10  B=11-50  C=51-200  D=201-500
 #                   E=501-1k  F=1k-5k  G=5k-10k  H=10k+
-#   icp_tipo    : rótulo interno para scoring (ICP1 / ICP2 / ICP3)
-#
-# Deixe a lista vazia ([]) para desabilitar o LinkedIn hunt.
-# ─────────────────────────────────────────────────────────────────
+# ─────────────────────────────────────────────────────────────────────────────
 LINKEDIN_HUNT_FILTERS: list[dict] = [
-    # EXEMPLO — substitua pelos filtros reais quando disponíveis:
-    # {
-    #     "keywords": "last mile delivery entregadores plataforma",
-    #     "location": "Brazil",
-    #     "industry": ["Transportation, Logistics, Supply Chain and Storage"],
-    #     "companySize": ["C", "D", "E", "F"],   # 51–5000 funcionários
-    #     "icp_tipo": "ICP1",
-    # },
-    # {
-    #     "keywords": "motoboy courier delivery app motoristas",
-    #     "location": "Brazil",
-    #     "companySize": ["B", "C", "D"],
-    #     "icp_tipo": "ICP1",
-    # },
+
+    # ═══════════════════════════════════════════════════════════════════
+    # ICP1 — PLATAFORMAS DELIVERY (AP Compulsório + Perda de Renda)
+    # Ref: 91 empresas no pipeline | 21 HOT | 61 WARM | score médio 62
+    # Empresas-alvo: Rappi, Keeta, 99Food, Mottu, Lalamove, Total Express,
+    #   Jadlog, Shopee Logística, Zé Delivery, Uello, 99Entrega, Loggi...
+    # ═══════════════════════════════════════════════════════════════════
+
+    # ── Q01: Food delivery — plataformas médias e grandes ──────────────
+    # Cobre: Rappi, Keeta, 99Food, aiqfome, James Delivery, Zé Delivery
+    # Porte: Médio-Grande (201–10k+ func) — score médio ICP1 = 62
+    {
+        "_description": "Food delivery plataformas médias e grandes — tier HOT/WARM",
+        "keywords": "food delivery plataforma entregadores parceiros",
+        "location": "Brazil",
+        "industry": [
+            "Transportation, Logistics, Supply Chain and Storage",
+            "Food and Beverage Services",
+        ],
+        "companySize": ["D", "E", "F", "G", "H"],
+        "icp_tipo": "ICP1",
+    },
+
+    # ── Q02: Moto delivery / courier urbano — porte pequeno e médio ────
+    # Cobre: Lalamove, Flash Courier, Jet Motoboy, Logmoto, Motoboy BR,
+    #   Rapiddo, Zoom Entregas, Expresso Rápido, Logística Urbana
+    # Porte: Pequeno-Médio (11–500 func) → pipeline tem 35 Pequenos em ICP1
+    {
+        "_description": "Moto delivery, motoboy, courier urbano — porte pequeno e médio",
+        "keywords": "moto delivery motoboy courier urbano entregador",
+        "location": "Brazil",
+        "industry": [
+            "Transportation, Logistics, Supply Chain and Storage",
+        ],
+        "companySize": ["B", "C", "D", "E"],
+        "icp_tipo": "ICP1",
+    },
+
+    # ── Q03: Logtech last mile — transportadora e-commerce ─────────────
+    # Cobre: Total Express, Jadlog, CB Full, ASAP Log, J&T Express,
+    #   Carriers Logística, TudoEntregue, B2Log, Box Delivery, Send4
+    # Porte: Médio-Grande (51–5k func)
+    {
+        "_description": "Logtech last mile e transportadora e-commerce",
+        "keywords": "last mile logtech transportadora entrega expressas",
+        "location": "Brazil",
+        "industry": [
+            "Transportation, Logistics, Supply Chain and Storage",
+            "Technology, Information and Internet",
+        ],
+        "companySize": ["C", "D", "E", "F", "G"],
+        "icp_tipo": "ICP1",
+    },
+
+    # ── Q04: On-demand app / plataforma motoristas autônomos ───────────
+    # Cobre: 99Entrega Moto, Shippify, Logbee, Vuxx, Levoo, Eu Entrego,
+    #   Mobibuzz, dLieve, Plataforma Delivery B2B
+    # Baseado no filtro original da screenshot: "delivery" + Brasil
+    {
+        "_description": "Plataformas on-demand e motoristas autônomos — filtro base do screenshot",
+        "keywords": "delivery app motoristas autônomos plataforma gig",
+        "location": "Brazil",
+        "industry": [
+            "Transportation, Logistics, Supply Chain and Storage",
+            "Technology, Information and Internet",
+        ],
+        "companySize": ["B", "C", "D", "E"],
+        "icp_tipo": "ICP1",
+    },
+
+    # ── Q05: Operador logístico 3PL + multinacionais ───────────────────
+    # Cobre: Sequoia Logística, Luft Logistics, FM Logistic, DHL Supply
+    #   Chain, XPO Logistics, Direct Log, Tegma
+    # Porte: Grande (1k–10k+ func)
+    {
+        "_description": "Operadores logísticos 3PL e multinacionais com frota last mile",
+        "keywords": "operador logístico 3PL armazenagem distribuição last mile",
+        "location": "Brazil",
+        "industry": [
+            "Transportation, Logistics, Supply Chain and Storage",
+        ],
+        "companySize": ["E", "F", "G", "H"],
+        "icp_tipo": "ICP1",
+    },
+
+    # ── Q06: Marketplace + logística própria ───────────────────────────
+    # Cobre: Shopee Logística, Shopee Express, Amazon DSP, Mercado Livre
+    #   Logistics, Magazine Luiza Entregas
+    # Porte: Grande (5k–10k+)
+    {
+        "_description": "Marketplace com logística própria e rede de entregadores parceiros",
+        "keywords": "marketplace logística própria entregadores parceiros DSP",
+        "location": "Brazil",
+        "industry": [
+            "Transportation, Logistics, Supply Chain and Storage",
+            "Technology, Information and Internet",
+        ],
+        "companySize": ["F", "G", "H"],
+        "icp_tipo": "ICP1",
+    },
+
+    # ── Q07: Locadora de motos / micromobilidade ────────────────────────
+    # Cobre: Mottu (130k motos / 40k entregadores), Tembici (45k e-bikes),
+    #   Pedala, Ecobike Courier, Ecobike Cargo
+    # Nicho de alto potencial: seguro do VEÍCULO ≠ AP do entregador
+    {
+        "_description": "Locadora motos entregadores e micromobilidade — gap AP x seguro veículo",
+        "keywords": "locadora motos entregadores aluguel moto frota bike courier",
+        "location": "Brazil",
+        "industry": [
+            "Transportation, Logistics, Supply Chain and Storage",
+        ],
+        "companySize": ["B", "C", "D", "E", "F"],
+        "icp_tipo": "ICP1",
+    },
+
+    # ── Q08: Quick commerce / dark store / supermercado online ─────────
+    # Cobre: Daki, Shopper, James Delivery (Q-Commerce Boticário)
+    # Operações de entrega ultrarrápida com entregadores próprios
+    {
+        "_description": "Quick commerce, dark store, delivery ultrarrápido com entregadores",
+        "keywords": "quick commerce dark store delivery rápido supermercado online",
+        "location": "Brazil",
+        "industry": [
+            "Food and Beverage Services",
+            "Transportation, Logistics, Supply Chain and Storage",
+        ],
+        "companySize": ["C", "D", "E", "F"],
+        "icp_tipo": "ICP1",
+    },
+
+    # ── Q09: Courier especializado (saúde, farmácia, malotes) ──────────
+    # Cobre: Delivery Laboratorial SP, Entregas Farmacêuticas Urgentes,
+    #   Transporte SAMU/Saúde, Transporte Malotes Corporativos
+    # Motoboys especializados = alto risco de sinistro
+    {
+        "_description": "Courier especializado saúde, farmácia e malotes — motoboys alto risco",
+        "keywords": "delivery farmacêutico laboratorial urgente motoboy saúde",
+        "location": "Brazil",
+        "industry": [
+            "Hospitals and Health Care",
+            "Transportation, Logistics, Supply Chain and Storage",
+        ],
+        "companySize": ["A", "B", "C", "D"],
+        "icp_tipo": "ICP1",
+    },
+
+    # ── Q10: Cargo aéreo + last mile / transportadoras regionais ───────
+    # Cobre: Gollog (GOL), Azul Cargo Express, Braspress, Patrus,
+    #   Jamef, Rodonaves, CB Logística
+    # Transportadoras com frota própria e entregadores expostos
+    {
+        "_description": "Cargo aéreo + last mile e transportadoras regionais com frota",
+        "keywords": "cargo aéreo transportadora regional frota entregadores carga fracionada",
+        "location": "Brazil",
+        "industry": [
+            "Transportation, Logistics, Supply Chain and Storage",
+        ],
+        "companySize": ["D", "E", "F", "G", "H"],
+        "icp_tipo": "ICP1",
+    },
+
+
+    # ═══════════════════════════════════════════════════════════════════
+    # ICP2 — EMBARCADORES / GERADORA DE ETIQUETA (Mercadoria Last Mile)
+    # Ref: 19 empresas no pipeline | 6 HOT | 12 WARM | score médio 68
+    # Empresas-alvo: Bling, Nuvemshop, Olist, VTEX, Mandaê, Melhor Envio,
+    #   Frenet, Tiny ERP, Anymarket, Kangu, Posta Já
+    # ═══════════════════════════════════════════════════════════════════
+
+    # ── Q11: ERP e-commerce com módulo de etiqueta/frete ───────────────
+    # Cobre: Bling ERP, Tiny ERP, Olist (Hub+ERP), Skyhub/TOTVS
+    # Geram etiqueta → ponto de integração ad valorem 0,88%
+    {
+        "_description": "ERP e-commerce com etiqueta e frete — Bling, Tiny, Olist tier",
+        "keywords": "ERP e-commerce etiqueta envio gestão loja online",
+        "location": "Brazil",
+        "industry": [
+            "Software Development",
+            "Technology, Information and Internet",
+        ],
+        "companySize": ["C", "D", "E", "F", "G"],
+        "icp_tipo": "ICP2",
+    },
+
+    # ── Q12: Plataforma e-commerce + gateway frete ─────────────────────
+    # Cobre: Nuvemshop, VTEX, Shopify Brasil, Anymarket, Frete Rápido,
+    #   Melhor Envio, Frenet, Mandaê, Backlogi
+    # Integração API no checkout = seguro ad valorem automático
+    {
+        "_description": "Plataforma e-commerce e gateway frete — integração API checkout",
+        "keywords": "plataforma e-commerce marketplace frete integração envio",
+        "location": "Brazil",
+        "industry": [
+            "Technology, Information and Internet",
+            "Software Development",
+        ],
+        "companySize": ["B", "C", "D", "E", "F", "G", "H"],
+        "icp_tipo": "ICP2",
+    },
+
+    # ── Q13: Agência franqueada Correios / PUDO / pontos coleta ────────
+    # Cobre: Posta Já, Correios (Agências Franqueadas), Kangu
+    # Porte pequeno mas alto volume de despachos
+    {
+        "_description": "Agências franqueadas Correios, PUDO e pontos de coleta",
+        "keywords": "agência franqueada Correios despacho encomenda ponto coleta PUDO",
+        "location": "Brazil",
+        "industry": [
+            "Transportation, Logistics, Supply Chain and Storage",
+        ],
+        "companySize": ["A", "B", "C", "D"],
+        "icp_tipo": "ICP2",
+    },
+
+
+    # ═══════════════════════════════════════════════════════════════════
+    # ICP3 — TMS / SOFTWARE DE GESTÃO (Canal Parceiro Mercadoria)
+    # Ref: 13 empresas no pipeline | 3 HOT | 10 WARM | score médio 63
+    # HOT: Pick and Go, Gaudium/Machine, Intelipost
+    # WARM: RoutEasy, Logcomex, Rotafácil, Brinelog, Devilry, LogPlan
+    # ═══════════════════════════════════════════════════════════════════
+
+    # ── Q14: TMS roteirização PME ──────────────────────────────────────
+    # Cobre: Pick and Go, Rotafácil, RoutEasy, Brinelog
+    # PME transportadoras = canal parceiro para seguro mercadoria
+    {
+        "_description": "TMS roteirização para PME transportadoras — Pick and Go, RoutEasy tier",
+        "keywords": "TMS roteirização transportadora software gestão entregas",
+        "location": "Brazil",
+        "industry": [
+            "Software Development",
+            "Technology, Information and Internet",
+        ],
+        "companySize": ["A", "B", "C", "D"],
+        "icp_tipo": "ICP3",
+    },
+
+    # ── Q15: TMS gestão frete / frota / last mile ──────────────────────
+    # Cobre: Intelipost, Gaudium/Machine, Logcomex, Devilry, LogPlan,
+    #   Translogística, Flixlog
+    # Integração TMS → seguro automático na emissão de CT-e/DACTE
+    {
+        "_description": "TMS gestão frete e frota — Intelipost, Gaudium, Logcomex tier",
+        "keywords": "TMS gestão frete frota logística software SaaS transportadora",
+        "location": "Brazil",
+        "industry": [
+            "Software Development",
+            "Technology, Information and Internet",
+            "Transportation, Logistics, Supply Chain and Storage",
+        ],
+        "companySize": ["B", "C", "D", "E"],
+        "icp_tipo": "ICP3",
+    },
 ]
 
 # ═══════════════════════════════════════════════════════════════
