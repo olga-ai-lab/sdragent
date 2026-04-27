@@ -289,7 +289,7 @@ class SDROrchestrator:
     # ═══════════════════════════════════════════════════════════
 
     def _persist_leads(self, leads: list[dict]):
-        """Upsert leads no Supabase."""
+        """Upsert leads no Supabase — dual-write: pipeline legado + CRM."""
         saved = 0
         for lead in leads:
             if lead.get("status") == "excluded":
@@ -299,6 +299,11 @@ class SDROrchestrator:
                 saved += 1
             except Exception as e:
                 print(f"  ⚠️  Erro salvando {lead.get('nome')}: {e}")
+                continue
+            try:
+                self.supabase.upsert_crm_lead(lead)
+            except Exception as e:
+                print(f"  ⚠️  CRM upsert falhou para {lead.get('nome')}: {e}")
         print(f"  ✅ {saved}/{len(leads)} leads salvos no Supabase")
 
     def _print_report(self, leads: list[dict], elapsed: float):

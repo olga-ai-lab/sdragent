@@ -335,6 +335,117 @@ def test_supabase_upsert(sb):
 
 
 # ─────────────────────────────────────────────────────────────────
+# [6b] CRM UPSERT — leads_bamaq (Pipeline 6)
+# ─────────────────────────────────────────────────────────────────
+
+def test_crm_upsert(sb):
+    header("[6b] CRM — upsert em leads_bamaq + verificação de stage")
+    if sb is None:
+        warn("Supabase não disponível — pulando")
+        RESULTS.append({"test": "crm_upsert", "status": "skip"})
+        return
+
+    from modules.scoring import ScoringEngine
+    scored = ScoringEngine().score_lead(dict(TEST_LEAD))
+
+    try:
+        sb.upsert_crm_lead(scored)
+        ok(f"CRM upsert OK — empresa_id={scored['empresa_id']}, stage esperado=43")
+
+        crm = sb.get_crm_lead_by_empresa_id(scored["empresa_id"])
+        if crm:
+            ok(f"Confirmado no CRM — pipeline_id={crm.get('pipeline_id')}, stage_id={crm.get('stage_id')}, sdr_status={crm.get('sdr_status')}")
+            assert crm.get("pipeline_id") == 6, f"pipeline_id deve ser 6, got {crm.get('pipeline_id')}"
+            assert crm.get("stage_id") in (42, 43, 44), f"stage_id inesperado: {crm.get('stage_id')}"
+        else:
+            warn("Lead não encontrado na query CRM")
+
+        RESULTS.append({"test": "crm_upsert", "status": "ok"})
+    except Exception as e:
+        fail(f"Erro CRM upsert: {e}")
+        RESULTS.append({"test": "crm_upsert", "status": "error", "error": str(e)})
+    finally:
+        try:
+            sb.client.delete(
+                sb._rest_url("leads_bamaq"),
+                params={"empresa_id": f"eq.{TEST_LEAD['empresa_id']}"},
+            )
+            info("Lead CRM de teste removido")
+        except Exception:
+            warn("Não foi possível limpar lead CRM de teste")
+
+
+# ─────────────────────────────────────────────────────────────────
+# [6c] CRM STAGE TRANSITION — HOT → meeting_booked (43 → 45)
+# ─────────────────────────────────────────────────────────────────
+
+def test_crm_stage_transition(sb):
+    header("[6c] CRM — transição HOT → meeting_booked (stage 43→45)")
+    if sb is None:
+        warn("Supabase não disponível — pulando")
+        RESULTS.append({"test": "crm_stage_transition", "status": "skip"})
+        return
+
+    lead = {**TEST_LEAD, "empresa_id": "test_88i_crm_transition", "status": "HOT"}
+    try:
+        sb.upsert_crm_lead(lead)
+        ok("Lead inserido no CRM com stage HOT=43")
+
+        sb.update_crm_stage(lead["empresa_id"], stage_id=45, sdr_status="meeting_booked")
+        crm = sb.get_crm_lead_by_empresa_id(lead["empresa_id"])
+        if crm:
+            assert crm.get("stage_id") == 45, f"stage_id deve ser 45, got {crm.get('stage_id')}"
+            assert crm.get("sdr_status") == "meeting_booked"
+            ok(f"Stage atualizado corretamente → stage_id={crm['stage_id']}, sdr_status={crm['sdr_status']}")
+
+        RESULTS.append({"test": "crm_stage_transition", "status": "ok"})
+    except Exception as e:
+        fail(f"Erro transição CRM: {e}")
+        RESULTS.append({"test": "crm_stage_transition", "status": "error", "error": str(e)})
+    finally:
+        try:
+            sb.client.delete(
+                sb._rest_url("leads_bamaq"),
+                params={"empresa_id": f"eq.{lead['empresa_id']}"},
+            )
+            info("Lead CRM de transição removido")
+        except Exception:
+            warn("Não foi possível limpar lead de transição")
+
+
+# ─────────────────────────────────────────────────────────────────
+# [6d] FIELD MAPPER — _map_agent_to_crm converte todos os campos
+# ─────────────────────────────────────────────────────────────────
+
+def test_field_mapper():
+    header("[6d] Field mapper — _map_agent_to_crm")
+    from modules.supabase_client import _map_agent_to_crm
+    from config.settings import SDR_STAGE_MAP
+
+    lead = {
+        **TEST_LEAD,
+        "status": "HOT",
+        "score": 75,
+        "score_breakdown": {"volume_entregadores": 30},
+        "deal_value_est": 1800000,
+    }
+    crm = _map_agent_to_crm(lead)
+
+    assert crm.get("pipeline_id") == 6,                 "pipeline_id deve ser 6"
+    assert crm.get("company_name") == TEST_LEAD["nome"], "nome → company_name"
+    assert crm.get("full_name") == TEST_LEAD["decisor_nome"], "decisor_nome → full_name"
+    assert crm.get("sdr_score") == 75,                  "score → sdr_score"
+    assert crm.get("stage_id") == SDR_STAGE_MAP["HOT"], "HOT → stage 43"
+    assert crm.get("sdr_status") == "HOT",              "sdr_status = HOT"
+    assert crm.get("empresa_id") == TEST_LEAD["empresa_id"], "empresa_id passthrough"
+    assert crm.get("icp_tipo") == "ICP1",               "icp_tipo passthrough"
+    assert crm.get("deal_value_est") == 1800000,        "deal_value_est passthrough"
+
+    ok(f"Mapper OK — {len(crm)} campos mapeados, stage_id={crm['stage_id']}, pipeline_id={crm['pipeline_id']}")
+    RESULTS.append({"test": "field_mapper", "status": "ok", "fields": len(crm)})
+
+
+# ─────────────────────────────────────────────────────────────────
 # [7] OUTREACH — personalização de mensagem
 # ─────────────────────────────────────────────────────────────────
 
@@ -423,6 +534,9 @@ def main():
     scored = test_scoring()
     test_digest(scored, phone=args.phone)
     test_supabase_upsert(sb)
+    test_field_mapper()
+    test_crm_upsert(sb)
+    test_crm_stage_transition(sb)
     test_outreach()
     test_state_machine()
 

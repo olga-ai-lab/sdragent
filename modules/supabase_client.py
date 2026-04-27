@@ -7,7 +7,7 @@ import json
 from datetime import datetime, timezone
 from typing import Optional
 import httpx
-from config.settings import SUPABASE_URL, SUPABASE_KEY, SUPABASE_SERVICE_KEY, SUPABASE_TABLES
+from config.settings import SUPABASE_URL, SUPABASE_KEY, SUPABASE_SERVICE_KEY, SUPABASE_TABLES, SDR_STAGE_MAP, PIPELINE_SDR_IA
 
 # Colunas conhecidas de companies_88i_pipeline.
 # Campos extras no lead dict são descartados antes do upsert para evitar 400.
@@ -29,6 +29,51 @@ _PIPELINE_COLUMNS = {
     "sources","status_history","status_changed_at","status_reason",
     "web_pages_scraped","enrichment_source","enrichment_error","ai_decisor_sugerido",
 }
+
+
+# ── Mapper: agent lead dict → leads_bamaq columns ────────────────────────
+_AGENT_TO_CRM: dict[str, str] = {
+    "nome":             "company_name",
+    "site":             "website",
+    "cnpj":             "cnpj_empresa",
+    "segmento":         "company_industry",
+    "cidade":           "city",
+    "uf":               "state",
+    "porte":            "porte",
+    "decisor_nome":     "full_name",
+    "decisor_cargo":    "job_title",
+    "decisor_email":    "email",
+    "decisor_telefone": "phone",
+    "decisor_linkedin": "linkedin_url",
+    "source":           "source",
+    "score":            "sdr_score",
+    "score_breakdown":  "sdr_score_breakdown",
+}
+
+_CRM_PASSTHROUGH = {
+    "empresa_id", "icp_tipo", "deal_value_est", "deal_value_premissas",
+    "produto_88i", "tier_88i", "seguro_atual", "entregadores_est",
+    "gap_oportunidade", "obs_estrategica", "proxima_acao",
+    "linkedin_empresa", "sdr_status", "ai_enrichment",
+    "bant_score", "budget_confirmado", "authority_confirmado",
+    "need_confirmado", "timeline_confirmado",
+    "numero_entregadores", "volume_entregas", "faixa_mensal",
+}
+
+
+def _map_agent_to_crm(lead: dict, pipeline_id: int = PIPELINE_SDR_IA) -> dict:
+    crm: dict = {"pipeline_id": pipeline_id}
+    for src, dst in _AGENT_TO_CRM.items():
+        if src in lead:
+            crm[dst] = lead[src]
+    for key in _CRM_PASSTHROUGH:
+        if key in lead:
+            crm[key] = lead[key]
+    sdr_status = lead.get("status") or lead.get("sdr_status") or "discovered"
+    crm["sdr_status"] = sdr_status
+    crm["stage_id"]   = SDR_STAGE_MAP.get(sdr_status, 42)
+    crm["updated_at"] = datetime.now(timezone.utc).isoformat()
+    return crm
 
 
 class SupabaseClient:
@@ -229,6 +274,62 @@ class SupabaseClient:
         resp = self.client.post(f"{self.url}/rest/v1/rpc/{function_name}", json=params or {})
         resp.raise_for_status()
         return resp.json()
+
+    # ───────────────────────────────────────────
+    # CRM — leads_bamaq (Pipeline 6 Vendas IA)
+    # ───────────────────────────────────────────
+
+    def upsert_crm_lead(self, lead: dict) -> dict:
+        """Upsert em leads_bamaq, dedup por empresa_id."""
+        payload = _map_agent_to_crm(lead)
+        resp = self.client.post(
+            self._rest_url(SUPABASE_TABLES["crm_leads"]),
+            json=payload,
+            headers={**self.headers,
+                     "Prefer": "return=representation,resolution=merge-duplicates"},
+        )
+        resp.raise_for_status()
+        return resp.json()
+
+    def get_crm_leads(self, pipeline_id: int = PIPELINE_SDR_IA,
+                      stage_id: int = None, limit: int = 100) -> list[dict]:
+        params = {
+            "select": "*",
+            "pipeline_id": f"eq.{pipeline_id}",
+            "limit": str(limit),
+            "order": "sdr_score.desc.nullslast",
+        }
+        if stage_id:
+            params["stage_id"] = f"eq.{stage_id}"
+        resp = self.client.get(self._rest_url(SUPABASE_TABLES["crm_leads"]), params=params)
+        resp.raise_for_status()
+        return resp.json()
+
+    def update_crm_stage(self, empresa_id: str, stage_id: int,
+                         sdr_status: str = "") -> dict:
+        updates: dict = {
+            "stage_id": stage_id,
+            "stage_entered_at": datetime.now(timezone.utc).isoformat(),
+            "updated_at": datetime.now(timezone.utc).isoformat(),
+        }
+        if sdr_status:
+            updates["sdr_status"] = sdr_status
+        resp = self.client.patch(
+            self._rest_url(SUPABASE_TABLES["crm_leads"]),
+            params={"empresa_id": f"eq.{empresa_id}"},
+            json=updates,
+        )
+        resp.raise_for_status()
+        return resp.json()
+
+    def get_crm_lead_by_empresa_id(self, empresa_id: str) -> Optional[dict]:
+        resp = self.client.get(
+            self._rest_url(SUPABASE_TABLES["crm_leads"]),
+            params={"empresa_id": f"eq.{empresa_id}", "limit": "1", "select": "*"},
+        )
+        resp.raise_for_status()
+        data = resp.json()
+        return data[0] if data else None
 
     def close(self):
         self.client.close()

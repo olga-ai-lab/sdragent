@@ -629,6 +629,35 @@ SUPABASE_TABLES = {
     "meetings": "sdr_meetings_booked",
     "lead_intelligence": "sdr_lead_intelligence",
     "lead_events": "sdr_lead_events",
+    "crm_leads": "leads_bamaq",
+}
+
+# ═══════════════════════════════════════════════════════════════
+# CRM PIPELINE IDs (leads_bamaq)
+# ═══════════════════════════════════════════════════════════════
+
+PIPELINE_SDR_IA    = 6   # Vendas IA — agent owns this
+PIPELINE_COMERCIAL = 1   # Propostas / comercial humano
+
+# SDR lifecycle status → CRM stage_id (Pipeline 6 — Vendas IA)
+# Stages: 42=Lead Novo | 43=MQL | 44=SQL | 45=Reunião Agendada
+#         46=Proposta Enviada | 47=Negociação | 48=Fechado Ganho | 49=Fechado Perdido
+SDR_STAGE_MAP: dict[str, int] = {
+    "discovered":     42,
+    "enriched":       42,
+    "HOT":            43,
+    "WARM":           43,
+    "COLD":           43,
+    "contacted":      44,
+    "replied":        44,
+    "no_response":    43,
+    "meeting_booked": 45,
+    "nurture":        43,
+    "won":            48,
+    "lost":           49,
+    "archived":       49,
+    "excluded":       49,
+    "no_show":        43,
 }
 
 # ═══════════════════════════════════════════════════════════════

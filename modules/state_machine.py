@@ -101,6 +101,17 @@ class LeadStateMachine:
             except Exception as e:
                 log.error(f"Erro persistindo transição no Supabase: {e}")
 
+            try:
+                from config.settings import SDR_STAGE_MAP
+                stage_id = SDR_STAGE_MAP.get(new_status, 42)
+                self.supabase.update_crm_stage(
+                    lead.get("empresa_id", empresa),
+                    stage_id,
+                    sdr_status=new_status,
+                )
+            except Exception as e:
+                log.error(f"Erro atualizando stage CRM: {e}")
+
         return lead
 
     def get_available_transitions(self, current_status: str) -> list[str]:
